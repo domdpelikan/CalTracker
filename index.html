@@ -54,6 +54,41 @@
             transform: scale(1.05);
         }
 
+        .sync-status {
+            position: absolute;
+            top: 70px;
+            right: 20px;
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 10px;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .sync-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #4CAF50;
+        }
+
+        .sync-indicator.syncing {
+            background: #FF9800;
+            animation: pulse 1s infinite;
+        }
+
+        .sync-indicator.offline {
+            background: #f44336;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
         .date-navigation {
             display: flex;
             align-items: center;
@@ -277,17 +312,84 @@
             color: white;
             border-color: transparent;
         }
+
+        .user-setup {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+
+        .user-id-display {
+            font-size: 14px;
+            color: #666;
+            margin-bottom: 10px;
+        }
+
+        .setup-buttons {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .setup-btn {
+            padding: 10px 15px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        .today-btn {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 20px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+            transition: all 0.3s;
+            z-index: 1000;
+            display: none;
+        }
+
+        .today-btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.6);
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <button class="export-btn" onclick="exportToCSV()">📥 Export CSV</button>
+        <div class="sync-status" id="syncStatus">
+            <div class="sync-indicator" id="syncIndicator"></div>
+            <span id="syncText">Offline</span>
+        </div>
+        
         <div class="header">
             <h1>🍽️ Food Tracker</h1>
             <div class="date-navigation">
                 <button class="nav-btn" onclick="changeDate(-1)">←</button>
                 <div class="date-display" id="dateDisplay">Loading...</div>
                 <button class="nav-btn" onclick="changeDate(1)">→</button>
+            </div>
+        </div>
+
+        <div class="user-setup" id="userSetup">
+            <div class="user-id-display" id="userIdDisplay">User ID: Not set</div>
+            <div class="setup-buttons">
+                <button class="setup-btn" onclick="generateNewUser()">🆕 New User</button>
+                <button class="setup-btn" onclick="loadExistingUser()">📂 Load Existing</button>
+                <button class="setup-btn" onclick="showUserId()">📋 Show My ID</button>
             </div>
         </div>
 
@@ -367,19 +469,204 @@
                 </div>
             </div>
         </div>
+        
+        <!-- Jump to Today Button -->
+        <button class="today-btn" id="todayBtn" onclick="jumpToToday()">📅 Today</button>
     </div>
 
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { getDatabase, ref, set, get, onValue, push, remove } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js';
+
+        // Firebase configuration (Demo configuration - replace with your own)
+        const firebaseConfig = {
+            apiKey: "AIzaSyDemo123456789-replace-with-your-key",
+            authDomain: "food-tracker-demo.firebaseapp.com",
+            databaseURL: "https://food-tracker-demo-default-rtdb.firebaseio.com",
+            projectId: "food-tracker-demo",
+            storageBucket: "food-tracker-demo.appspot.com",
+            messagingSenderId: "123456789012",
+            appId: "1:123456789012:web:abcdef123456789"
+        };
+
+        // Initialize Firebase
+        let app, database;
+        let isOnline = false;
+        let currentUserId = null;
+
+        try {
+            app = initializeApp(firebaseConfig);
+            database = getDatabase(app);
+            isOnline = true;
+            updateSyncStatus('online', 'Connected');
+        } catch (error) {
+            console.error('Firebase initialization failed:', error);
+            updateSyncStatus('offline', 'Offline Mode');
+        }
+
+        // Make Firebase functions available globally
+        window.firebaseDB = {
+            database,
+            ref,
+            set,
+            get,
+            onValue,
+            push,
+            remove,
+            isOnline: () => isOnline
+        };
+
+        // Cloud sync functions
+        window.cloudSync = {
+            async saveToCloud(data, userId = currentUserId) {
+                if (!isOnline || !userId) return false;
+                
+                try {
+                    updateSyncStatus('syncing', 'Syncing...');
+                    const userRef = ref(database, `users/${userId}/data`);
+                    await set(userRef, data);
+                    updateSyncStatus('online', 'Synced');
+                    return true;
+                } catch (error) {
+                    console.error('Cloud save failed:', error);
+                    updateSyncStatus('offline', 'Sync Failed');
+                    return false;
+                }
+            },
+
+            async loadFromCloud(userId = currentUserId) {
+                if (!isOnline || !userId) return null;
+                
+                try {
+                    updateSyncStatus('syncing', 'Loading...');
+                    const userRef = ref(database, `users/${userId}/data`);
+                    const snapshot = await get(userRef);
+                    updateSyncStatus('online', 'Loaded');
+                    return snapshot.exists() ? snapshot.val() : null;
+                } catch (error) {
+                    console.error('Cloud load failed:', error);
+                    updateSyncStatus('offline', 'Load Failed');
+                    return null;
+                }
+            },
+
+            async setupRealtimeSync(userId = currentUserId) {
+                if (!isOnline || !userId) return;
+                
+                const userRef = ref(database, `users/${userId}/data`);
+                onValue(userRef, (snapshot) => {
+                    if (snapshot.exists()) {
+                        const cloudData = snapshot.val();
+                        // Only update if cloud data is different from local
+                        const localData = JSON.stringify(allData);
+                        const cloudDataStr = JSON.stringify(cloudData);
+                        
+                        if (localData !== cloudDataStr) {
+                            allData = cloudData;
+                            updateDisplay();
+                            console.log('Data synced from cloud');
+                        }
+                    }
+                });
+            }
+        };
+
+        function updateSyncStatus(status, text) {
+            const indicator = document.getElementById('syncIndicator');
+            const statusText = document.getElementById('syncText');
+            
+            indicator.className = `sync-indicator ${status}`;
+            statusText.textContent = text;
+        }
+
+        // User management functions
+        window.generateNewUser = function() {
+            const userId = 'user_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
+            currentUserId = userId;
+            localStorage.setItem('foodTrackerUserId', userId);
+            document.getElementById('userIdDisplay').textContent = `User ID: ${userId}`;
+            
+            // Save current data to cloud with new user ID
+            if (window.cloudSync.isOnline()) {
+                window.cloudSync.saveToCloud(allData, userId);
+                window.cloudSync.setupRealtimeSync(userId);
+            }
+            
+            alert(`New user created!\nUser ID: ${userId}\n\nSave this ID to access your data from other devices!`);
+        };
+
+        window.loadExistingUser = function() {
+            const userId = prompt('Enter your User ID:');
+            if (!userId) return;
+            
+            currentUserId = userId;
+            localStorage.setItem('foodTrackerUserId', userId);
+            document.getElementById('userIdDisplay').textContent = `User ID: ${userId}`;
+            
+            // Load data from cloud
+            if (window.cloudSync.isOnline()) {
+                window.cloudSync.loadFromCloud(userId).then(cloudData => {
+                    if (cloudData) {
+                        allData = cloudData;
+                        saveData(); // Save to localStorage as backup
+                        updateDisplay();
+                        window.cloudSync.setupRealtimeSync(userId);
+                        alert('Data loaded successfully from cloud!');
+                    } else {
+                        alert('No data found for this User ID');
+                    }
+                });
+            } else {
+                alert('Cannot load data - offline mode');
+            }
+        };
+
+        window.showUserId = function() {
+            if (currentUserId) {
+                const message = `Your User ID: ${currentUserId}\n\nSave this ID to access your data from other devices!`;
+                if (navigator.share) {
+                    navigator.share({
+                        title: 'Food Tracker User ID',
+                        text: message
+                    });
+                } else {
+                    navigator.clipboard.writeText(currentUserId).then(() => {
+                        alert(message + '\n\nUser ID copied to clipboard!');
+                    }).catch(() => {
+                        alert(message);
+                    });
+                }
+            } else {
+                alert('No User ID set. Please create a new user or load an existing one.');
+            }
+        };
+
+        // Initialize user on page load
+        window.addEventListener('load', () => {
+            const savedUserId = localStorage.getItem('foodTrackerUserId');
+            if (savedUserId) {
+                currentUserId = savedUserId;
+                document.getElementById('userIdDisplay').textContent = `User ID: ${savedUserId}`;
+                
+                // Setup realtime sync if online
+                if (isOnline) {
+                    window.cloudSync.setupRealtimeSync(savedUserId);
+                }
+            }
+        });
+    </script>
+
     <script>
-        // DATA STORAGE EXPLANATION:
-        // All data is stored in localStorage - this is browser storage that persists even after closing
-        // localStorage keeps data until you clear browser data or manually delete it
-        // Data is stored as JSON under the key 'foodTrackerData'
-        // Each day's data is stored with the date as the key (e.g., "2024-01-15")
+        // ENHANCED DATA STORAGE:
+        // 1. localStorage - Local browser storage (works offline)
+        // 2. Firebase Realtime Database - Cloud storage (syncs across devices)
+        // Data is automatically synced between local and cloud storage
         
         let currentDate = new Date();
         let currentMealType = 'breakfast';
         let allData = {};
-        let nutritionCache = {}; // Cache API responses to avoid repeated calls
+        let nutritionCache = {};
 
         // Initialize date display
         document.getElementById('dateDisplay').textContent = currentDate.toLocaleDateString('en-US', { 
@@ -389,14 +676,15 @@
             day: 'numeric' 
         });
 
-        // Load data from localStorage
+        // Enhanced load data function with cloud sync
         function loadData() {
+            // Load from localStorage first (always available)
             const stored = localStorage.getItem('foodTrackerData');
             if (stored) {
                 try {
                     allData = JSON.parse(stored);
                 } catch (e) {
-                    console.error('Error loading data:', e);
+                    console.error('Error loading local data:', e);
                     allData = {};
                 }
             }
@@ -414,18 +702,24 @@
             updateDisplay();
         }
 
-        // Save data to localStorage
+        // Enhanced save data function with cloud sync
         function saveData() {
+            // Save to localStorage (always works)
             try {
                 localStorage.setItem('foodTrackerData', JSON.stringify(allData));
                 localStorage.setItem('nutritionCache', JSON.stringify(nutritionCache));
             } catch (e) {
-                console.error('Error saving data:', e);
-                alert('Error saving data. Storage may be full.');
+                console.error('Error saving local data:', e);
+                alert('Error saving data locally. Storage may be full.');
+            }
+            
+            // Save to cloud if online and user is set
+            if (window.cloudSync && window.firebaseDB.isOnline()) {
+                window.cloudSync.saveToCloud(allData);
             }
         }
 
-        // Export all data to CSV
+        // Export all data to CSV (enhanced with cloud data)
         function exportToCSV() {
             let csv = 'Date,Meal Type,Food Item,Calories,Protein (g),Carbs (g),Fat (g)\n';
             
@@ -435,9 +729,11 @@
             sortedDates.forEach(date => {
                 const dayData = allData[date];
                 ['breakfast', 'lunch', 'dinner', 'snacks'].forEach(mealType => {
-                    dayData[mealType].forEach(food => {
-                        csv += `${date},${mealType},"${food.name}",${Math.round(food.calories)},${Math.round(food.protein)},${Math.round(food.carbs)},${Math.round(food.fat)}\n`;
-                    });
+                    if (dayData[mealType]) {
+                        dayData[mealType].forEach(food => {
+                            csv += `${date},${mealType},"${food.name}",${Math.round(food.calories)},${Math.round(food.protein)},${Math.round(food.carbs)},${Math.round(food.fat)}\n`;
+                        });
+                    }
                 });
             });
             
@@ -504,7 +800,7 @@
                         
                         // Cache the result
                         nutritionCache[cacheKey] = nutrition;
-                        saveData();
+                        saveData(); // This will also save to cloud
                         
                         return nutrition;
                     }
@@ -545,7 +841,7 @@
                         
                         // Cache the result
                         nutritionCache[cacheKey] = nutrition;
-                        saveData();
+                        saveData(); // This will also save to cloud
                         
                         return nutrition;
                     }
@@ -574,7 +870,7 @@
                         
                         // Cache the result
                         nutritionCache[cacheKey] = nutrition;
-                        saveData();
+                        saveData(); // This will also save to cloud
                         
                         return nutrition;
                     }
@@ -647,13 +943,36 @@
         // Change date
         function changeDate(direction) {
             currentDate.setDate(currentDate.getDate() + direction);
+            updateDateDisplay();
+            updateDisplay();
+        }
+
+        // Jump to today
+        function jumpToToday() {
+            currentDate = new Date();
+            updateDateDisplay();
+            updateDisplay();
+        }
+
+        // Update date display
+        function updateDateDisplay() {
+            const today = new Date();
+            const isToday = currentDate.toDateString() === today.toDateString();
+            
             document.getElementById('dateDisplay').textContent = currentDate.toLocaleDateString('en-US', { 
                 weekday: 'long', 
                 year: 'numeric', 
                 month: 'long', 
                 day: 'numeric' 
             });
-            updateDisplay();
+            
+            // Show/hide today button based on whether we're viewing today
+            const todayBtn = document.getElementById('todayBtn');
+            if (isToday) {
+                todayBtn.style.display = 'none';
+            } else {
+                todayBtn.style.display = 'block';
+            }
         }
 
         // Select meal type
@@ -680,7 +999,7 @@
                 todayData[currentMealType].push(foodData);
                 
                 document.getElementById('foodInput').value = '';
-                saveData();
+                saveData(); // This will also save to cloud
                 updateDisplay();
             } catch (error) {
                 console.error('Error adding food:', error);
@@ -695,7 +1014,7 @@
         function deleteFood(mealType, index) {
             const todayData = getTodayData();
             todayData[mealType].splice(index, 1);
-            saveData();
+            saveData(); // This will also save to cloud
             updateDisplay();
         }
 
@@ -711,7 +1030,7 @@
                 container.innerHTML = '';
                 let mealCalories = 0;
 
-                if (todayData[mealType].length === 0) {
+                if (!todayData[mealType] || todayData[mealType].length === 0) {
                     container.innerHTML = '<div class="empty-state">No items added</div>';
                 } else {
                     todayData[mealType].forEach((food, index) => {
@@ -754,6 +1073,4 @@
 
         // Initialize
         loadData();
-    </script>
-</body>
-</html>
+        updateDateDisplay(); // Initialize the today button visibility
