@@ -794,16 +794,16 @@
                 return nutritionCache[cacheKey];
             }
             
-            // Get OpenAI API key - YOU NEED TO REPLACE THIS WITH YOUR NEW KEY
+            // Get OpenAI API key
             let apiKey = localStorage.getItem('openai_api_key');
             
             // If no API key stored, prompt for it
             if (!apiKey) {
-                apiKey = prompt('Enter your OpenAI API key (starts with sk-):\n\nGet one at: platform.openai.com');
+                apiKey = prompt('Enter your NEW OpenAI API key (starts with sk-):\n\nYour previous key was compromised!\nGet a new one at: platform.openai.com/api-keys');
                 if (apiKey && apiKey.startsWith('sk-')) {
                     localStorage.setItem('openai_api_key', apiKey);
                 } else {
-                    alert('Invalid API key. Using estimated values.');
+                    alert('No API key provided. Using estimated values.');
                     return {
                         calories: 150,
                         protein: 10,
@@ -815,56 +815,85 @@
             
             // Use ChatGPT for accurate macros
             console.log('Asking ChatGPT for macros:', foodName);
+            console.log('Using API key:', apiKey.substring(0, 10) + '...');
             
             try {
+                const requestBody = {
+                    model: 'gpt-3.5-turbo',
+                    messages: [
+                        {
+                            role: 'system',
+                            content: 'You are a nutrition database. Respond ONLY with a JSON object containing calories, protein, carbs, and fat. Example: {"calories": 250, "protein": 20, "carbs": 30, "fat": 8}'
+                        },
+                        {
+                            role: 'user',
+                            content: `Nutrition facts for ${foodName}:`
+                        }
+                    ],
+                    temperature: 0.3,
+                    max_tokens: 100
+                };
+                
+                console.log('Sending request to OpenAI...');
+                
                 const response = await fetch('https://api.openai.com/v1/chat/completions', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${apiKey}`
                     },
-                    body: JSON.stringify({
-                        model: 'gpt-3.5-turbo', // Using 3.5 for faster, cheaper responses
-                        messages: [
-                            {
-                                role: 'system',
-                                content: 'You are a nutrition expert. When asked about food, provide ONLY a JSON object with macros. Example: {"calories": 250, "protein": 20, "carbs": 30, "fat": 8}. Be accurate based on typical serving sizes and USDA data. If quantity is specified, calculate accordingly.'
-                            },
-                            {
-                                role: 'user',
-                                content: `What are the exact nutritional macros for: ${foodName}? Respond ONLY with the JSON object, no other text.`
-                            }
-                        ],
-                        temperature: 0.1,
-                        max_tokens: 150
-                    })
+                    body: JSON.stringify(requestBody)
                 });
 
+                console.log('Response status:', response.status);
+
                 if (!response.ok) {
-                    const error = await response.json();
-                    console.error('OpenAI API error:', error);
-                    throw new Error('API request failed');
+                    const errorData = await response.json();
+                    console.error('OpenAI API error details:', errorData);
+                    
+                    if (response.status === 401) {
+                        // Invalid API key
+                        localStorage.removeItem('openai_api_key');
+                        alert('Invalid API key! You need to:\n1. Go to platform.openai.com/api-keys\n2. Revoke the old key\n3. Create a NEW key\n4. Reload this page and enter the new key');
+                        return {
+                            calories: 150,
+                            protein: 10,
+                            carbs: 20,
+                            fat: 5
+                        };
+                    } else if (response.status === 429) {
+                        alert('Rate limit exceeded. Wait a moment and try again.');
+                    } else if (response.status === 400) {
+                        alert('API request error. Check your API key or try again.');
+                    }
+                    
+                    throw new Error(`API error: ${errorData.error?.message || 'Unknown error'}`);
                 }
 
                 const data = await response.json();
-                console.log('ChatGPT response:', data);
+                console.log('ChatGPT full response:', data);
                 
                 const content = data.choices[0].message.content.trim();
                 console.log('ChatGPT nutrition content:', content);
                 
-                // Parse JSON response
+                // Parse JSON response - handle potential formatting issues
+                let nutritionJson = content;
+                
+                // Remove any markdown code blocks if present
+                nutritionJson = nutritionJson.replace(/```json\n?/g, '').replace(/```\n?/g, '');
+                
                 try {
-                    const nutrition = JSON.parse(content);
+                    const nutrition = JSON.parse(nutritionJson);
                     
-                    // Ensure all fields are present
+                    // Ensure all fields are present and valid
                     const finalNutrition = {
-                        calories: Math.round(nutrition.calories || 0),
-                        protein: Math.round((nutrition.protein || 0) * 10) / 10,
-                        carbs: Math.round((nutrition.carbs || 0) * 10) / 10,
-                        fat: Math.round((nutrition.fat || 0) * 10) / 10
+                        calories: Math.round(Number(nutrition.calories) || 150),
+                        protein: Math.round((Number(nutrition.protein) || 10) * 10) / 10,
+                        carbs: Math.round((Number(nutrition.carbs) || 20) * 10) / 10,
+                        fat: Math.round((Number(nutrition.fat) || 5) * 10) / 10
                     };
                     
-                    console.log('Final nutrition from ChatGPT:', finalNutrition);
+                    console.log('✓ Final nutrition from ChatGPT:', finalNutrition);
                     
                     // Cache the result
                     nutritionCache[cacheKey] = finalNutrition;
@@ -873,13 +902,36 @@
                     return finalNutrition;
                     
                 } catch (parseError) {
-                    console.error('Failed to parse ChatGPT response:', content, parseError);
+                    console.error('Failed to parse ChatGPT response:', nutritionJson);
+                    console.error('Parse error:', parseError);
+                    
+                    // Try to extract numbers from the response
+                    const calorieMatch = content.match(/calories[:\s]+(\d+)/i);
+                    const proteinMatch = content.match(/protein[:\s]+(\d+)/i);
+                    const carbMatch = content.match(/carbs?[:\s]+(\d+)/i);
+                    const fatMatch = content.match(/fat[:\s]+(\d+)/i);
+                    
+                    if (calorieMatch) {
+                        return {
+                            calories: parseInt(calorieMatch[1]),
+                            protein: proteinMatch ? parseInt(proteinMatch[1]) : 10,
+                            carbs: carbMatch ? parseInt(carbMatch[1]) : 20,
+                            fat: fatMatch ? parseInt(fatMatch[1]) : 5
+                        };
+                    }
+                    
                     throw parseError;
                 }
                 
             } catch (error) {
                 console.error('ChatGPT API error:', error);
-                alert(`Error getting nutrition data: ${error.message}\n\nUsing estimated values.`);
+                console.error('Full error details:', error.message);
+                
+                // Clear the API key if it's invalid
+                if (error.message.includes('401') || error.message.includes('Invalid')) {
+                    localStorage.removeItem('openai_api_key');
+                    alert('API key is invalid or expired. Please enter a new one next time.');
+                }
                 
                 // Return default values on error
                 return {
@@ -891,62 +943,10 @@
             }
         }
 
-        // Add food with ChatGPT macro lookup
-        async function addFood() {
-            const input = document.getElementById('foodInput').value;
-            if (!input) return;
-
-            const btn = document.querySelector('.btn');
-            const originalText = btn.textContent;
-            btn.textContent = 'Getting macros...';
-            btn.disabled = true;
-
-            try {
-                console.log('Adding food:', input);
-                
-                // Get nutrition from ChatGPT
-                const nutrition = await getNutritionFromAPI(input.trim());
-                
-                console.log('Got nutrition:', nutrition);
-                
-                const foodData = {
-                    name: input.trim(),
-                    calories: nutrition.calories,
-                    protein: nutrition.protein,
-                    carbs: nutrition.carbs,
-                    fat: nutrition.fat
-                };
-                
-                const todayData = getTodayData();
-                todayData[currentMealType].push(foodData);
-                
-                document.getElementById('foodInput').value = '';
-                saveData();
-                updateDisplay();
-                
-                // Success feedback
-                console.log(`✓ Added "${input}" with macros:`, nutrition);
-                
-            } catch (error) {
-                console.error('Error adding food:', error);
-                alert('Error getting nutrition data. Check your API key and try again.');
-            } finally {
-                btn.textContent = originalText;
-                btn.disabled = false;
-            }
-        }
-
-        // Delete food - with event.stopPropagation to prevent edit
-        function deleteFood(mealType, index) {
-            if (confirm('Delete this item?')) {
-                const todayData = getTodayData();
-                const deletedItem = todayData[mealType][index];
-                console.log('Deleting:', deletedItem.name);
-                
-                todayData[mealType].splice(index, 1);
-                saveData();
-                updateDisplay();
-            }
+        // Clear API key function (for testing)
+        function clearApiKey() {
+            localStorage.removeItem('openai_api_key');
+            console.log('API key cleared. You will be prompted for a new one.');
         }
 
         // Photo upload with ChatGPT analysis
