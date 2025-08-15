@@ -790,100 +790,105 @@
             
             // Check cache first
             if (nutritionCache[cacheKey]) {
+                console.log('Using cached nutrition for:', foodName);
                 return nutritionCache[cacheKey];
             }
             
-            // Get OpenAI API key
+            // Get OpenAI API key - YOU NEED TO REPLACE THIS WITH YOUR NEW KEY
             let apiKey = localStorage.getItem('openai_api_key');
             
-            // If no API key, prompt user to add one
+            // If no API key stored, prompt for it
             if (!apiKey) {
-                const shouldAddKey = confirm('To get accurate nutrition data, please add your OpenAI API key.\n\nGet one free at: platform.openai.com\n\nAdd API key now?');
-                if (shouldAddKey) {
-                    apiKey = prompt('Enter your OpenAI API key (starts with sk-):');
-                    if (apiKey) {
-                        localStorage.setItem('openai_api_key', apiKey);
-                    }
+                apiKey = prompt('Enter your OpenAI API key (starts with sk-):\n\nGet one at: platform.openai.com');
+                if (apiKey && apiKey.startsWith('sk-')) {
+                    localStorage.setItem('openai_api_key', apiKey);
+                } else {
+                    alert('Invalid API key. Using estimated values.');
+                    return {
+                        calories: 150,
+                        protein: 10,
+                        carbs: 20,
+                        fat: 5
+                    };
                 }
             }
             
-            // If we have an API key, use ChatGPT for accurate macros
-            if (apiKey) {
-                try {
-                    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${apiKey}`
-                        },
-                        body: JSON.stringify({
-                            model: 'gpt-4o-mini',
-                            messages: [
-                                {
-                                    role: 'system',
-                                    content: 'You are a nutrition expert. Provide accurate macro information for foods. Always respond with ONLY a JSON object in this exact format: {"calories": number, "protein": number, "carbs": number, "fat": number}. Numbers should be for the exact portion specified. Be as accurate as possible based on USDA data.'
-                                },
-                                {
-                                    role: 'user',
-                                    content: `What are the exact macros for: ${foodName}? Respond with only the JSON object, no other text.`
-                                }
-                            ],
-                            temperature: 0.1, // Low temperature for consistent, accurate results
-                            max_tokens: 100
-                        })
-                    });
-
-                    if (response.ok) {
-                        const data = await response.json();
-                        const content = data.choices[0].message.content;
-                        
-                        try {
-                            // Parse the JSON response from ChatGPT
-                            const nutrition = JSON.parse(content);
-                            
-                            // Validate the response has all required fields
-                            if (nutrition.calories !== undefined && 
-                                nutrition.protein !== undefined && 
-                                nutrition.carbs !== undefined && 
-                                nutrition.fat !== undefined) {
-                                
-                                // Round to reasonable precision
-                                const finalNutrition = {
-                                    calories: Math.round(nutrition.calories),
-                                    protein: Math.round(nutrition.protein * 10) / 10,
-                                    carbs: Math.round(nutrition.carbs * 10) / 10,
-                                    fat: Math.round(nutrition.fat * 10) / 10
-                                };
-                                
-                                // Cache the result
-                                nutritionCache[cacheKey] = finalNutrition;
-                                saveData();
-                                
-                                console.log(`ChatGPT nutrition for ${foodName}:`, finalNutrition);
-                                return finalNutrition;
+            // Use ChatGPT for accurate macros
+            console.log('Asking ChatGPT for macros:', foodName);
+            
+            try {
+                const response = await fetch('https://api.openai.com/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${apiKey}`
+                    },
+                    body: JSON.stringify({
+                        model: 'gpt-3.5-turbo', // Using 3.5 for faster, cheaper responses
+                        messages: [
+                            {
+                                role: 'system',
+                                content: 'You are a nutrition expert. When asked about food, provide ONLY a JSON object with macros. Example: {"calories": 250, "protein": 20, "carbs": 30, "fat": 8}. Be accurate based on typical serving sizes and USDA data. If quantity is specified, calculate accordingly.'
+                            },
+                            {
+                                role: 'user',
+                                content: `What are the exact nutritional macros for: ${foodName}? Respond ONLY with the JSON object, no other text.`
                             }
-                        } catch (parseError) {
-                            console.error('Error parsing ChatGPT response:', parseError);
-                        }
-                    }
-                } catch (error) {
-                    console.error('ChatGPT API error:', error);
+                        ],
+                        temperature: 0.1,
+                        max_tokens: 150
+                    })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    console.error('OpenAI API error:', error);
+                    throw new Error('API request failed');
                 }
+
+                const data = await response.json();
+                console.log('ChatGPT response:', data);
+                
+                const content = data.choices[0].message.content.trim();
+                console.log('ChatGPT nutrition content:', content);
+                
+                // Parse JSON response
+                try {
+                    const nutrition = JSON.parse(content);
+                    
+                    // Ensure all fields are present
+                    const finalNutrition = {
+                        calories: Math.round(nutrition.calories || 0),
+                        protein: Math.round((nutrition.protein || 0) * 10) / 10,
+                        carbs: Math.round((nutrition.carbs || 0) * 10) / 10,
+                        fat: Math.round((nutrition.fat || 0) * 10) / 10
+                    };
+                    
+                    console.log('Final nutrition from ChatGPT:', finalNutrition);
+                    
+                    // Cache the result
+                    nutritionCache[cacheKey] = finalNutrition;
+                    saveData();
+                    
+                    return finalNutrition;
+                    
+                } catch (parseError) {
+                    console.error('Failed to parse ChatGPT response:', content, parseError);
+                    throw parseError;
+                }
+                
+            } catch (error) {
+                console.error('ChatGPT API error:', error);
+                alert(`Error getting nutrition data: ${error.message}\n\nUsing estimated values.`);
+                
+                // Return default values on error
+                return {
+                    calories: 150,
+                    protein: 10,
+                    carbs: 20,
+                    fat: 5
+                };
             }
-            
-            // Fallback to estimated values if API fails
-            console.log('Using fallback nutrition values');
-            const nutrition = {
-                calories: Math.round(150 * quantity),
-                protein: Math.round(10 * quantity),
-                carbs: Math.round(20 * quantity),
-                fat: Math.round(5 * quantity)
-            };
-            
-            nutritionCache[cacheKey] = nutrition;
-            saveData();
-            
-            return nutrition;
         }
 
         // Add food with ChatGPT macro lookup
@@ -897,8 +902,12 @@
             btn.disabled = true;
 
             try {
-                // Send to ChatGPT for accurate nutrition
+                console.log('Adding food:', input);
+                
+                // Get nutrition from ChatGPT
                 const nutrition = await getNutritionFromAPI(input.trim());
+                
+                console.log('Got nutrition:', nutrition);
                 
                 const foodData = {
                     name: input.trim(),
@@ -915,45 +924,28 @@
                 saveData();
                 updateDisplay();
                 
-                // Show what ChatGPT found
-                console.log(`Added "${input}" with ChatGPT macros:`, nutrition);
+                // Success feedback
+                console.log(`✓ Added "${input}" with macros:`, nutrition);
                 
             } catch (error) {
                 console.error('Error adding food:', error);
-                alert('Error getting nutrition data. Please try again.');
+                alert('Error getting nutrition data. Check your API key and try again.');
             } finally {
                 btn.textContent = originalText;
                 btn.disabled = false;
             }
         }
 
-        // Edit food with ChatGPT macro lookup
-        function editFood(mealType, index) {
-            const todayData = getTodayData();
-            const food = todayData[mealType][index];
-            
-            const newName = prompt('Edit food item:', food.name);
-            if (newName && newName.trim()) {
-                // Show loading state
-                const container = document.getElementById(`${mealType}Items`);
-                const originalHTML = container.innerHTML;
+        // Delete food - with event.stopPropagation to prevent edit
+        function deleteFood(mealType, index) {
+            if (confirm('Delete this item?')) {
+                const todayData = getTodayData();
+                const deletedItem = todayData[mealType][index];
+                console.log('Deleting:', deletedItem.name);
                 
-                // Update with ChatGPT nutrition
-                getNutritionFromAPI(newName.trim()).then(nutrition => {
-                    todayData[mealType][index] = {
-                        name: newName.trim(),
-                        calories: nutrition.calories,
-                        protein: nutrition.protein,
-                        carbs: nutrition.carbs,
-                        fat: nutrition.fat
-                    };
-                    saveData();
-                    updateDisplay();
-                    console.log(`Updated "${newName}" with ChatGPT macros:`, nutrition);
-                }).catch(error => {
-                    console.error('Error updating food:', error);
-                    alert('Error getting nutrition data. Please try again.');
-                });
+                todayData[mealType].splice(index, 1);
+                saveData();
+                updateDisplay();
             }
         }
 
