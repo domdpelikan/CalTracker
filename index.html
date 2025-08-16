@@ -794,38 +794,9 @@
                 return nutritionCache[cacheKey];
             }
             
-            // Get Google API credentials
-            let googleApiKey = localStorage.getItem('google_api_key');
-            let searchEngineId = localStorage.getItem('google_search_engine_id');
-            
-            // If no API credentials stored, prompt for them
-            if (!googleApiKey || !searchEngineId) {
-                alert('Google Custom Search Setup Required!\n\n1. Go to console.cloud.google.com\n2. Enable Custom Search API\n3. Create API key\n4. Create Custom Search Engine at cse.google.com\n5. Get your Search Engine ID');
-                
-                if (!googleApiKey) {
-                    googleApiKey = prompt('Enter your Google API Key:');
-                    if (googleApiKey) {
-                        localStorage.setItem('google_api_key', googleApiKey);
-                    }
-                }
-                
-                if (!searchEngineId) {
-                    searchEngineId = prompt('Enter your Google Custom Search Engine ID:');
-                    if (searchEngineId) {
-                        localStorage.setItem('google_search_engine_id', searchEngineId);
-                    }
-                }
-                
-                if (!googleApiKey || !searchEngineId) {
-                    alert('No Google API credentials provided. Using estimated values.');
-                    return {
-                        calories: 150,
-                        protein: 10,
-                        carbs: 20,
-                        fat: 5
-                    };
-                }
-            }
+            // Use your pre-configured Google API credentials
+            const googleApiKey = 'AIzaSyAfbeus_WPHytcetzff0i3FM2lqWKQyLPw';
+            const searchEngineId = '86d68c6854a7145a8';
             
             // Search Google for nutrition information
             console.log('Searching Google for nutrition info:', foodName);
@@ -846,11 +817,9 @@
                     console.error('Google API error details:', errorText);
                     
                     if (response.status === 403) {
-                        alert('Google API error!\n\nPossible issues:\n1. API key invalid\n2. Custom Search API not enabled\n3. Quota exceeded\n4. Search Engine ID incorrect\n\nUsing food estimates instead.');
-                        localStorage.removeItem('google_api_key');
-                        localStorage.removeItem('google_search_engine_id');
+                        alert('Google API error!\n\nPossible issues:\n1. API quota exceeded (100 searches/day limit)\n2. Custom Search API not enabled\n3. API key restricted\n\nUsing food estimates instead.');
                     } else if (response.status === 400) {
-                        alert('Bad request to Google API. Check your Search Engine ID.');
+                        alert('Bad request to Google API. Using food estimates instead.');
                     }
                     
                     console.log('Falling back to nutrition estimation');
@@ -879,13 +848,8 @@
             } catch (error) {
                 console.error('Google Search API error:', error);
                 
-                // Return default values on error
-                return {
-                    calories: 150,
-                    protein: 10,
-                    carbs: 20,
-                    fat: 5
-                };
+                // Return estimated values on error
+                return estimateNutritionFromFoodName(foodName);
             }
         }
 
