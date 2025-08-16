@@ -834,29 +834,41 @@
                 const searchQuery = encodeURIComponent(`${foodName} nutrition facts calories protein carbs fat`);
                 const searchUrl = `https://www.googleapis.com/customsearch/v1?key=${googleApiKey}&cx=${searchEngineId}&q=${searchQuery}&num=5`;
                 
-                console.log('Sending request to Google Custom Search...');
+                console.log('Searching Google for:', foodName);
+                console.log('Search URL:', searchUrl.replace(googleApiKey, 'API_KEY_HIDDEN'));
                 
                 const response = await fetch(searchUrl);
                 
+                console.log('Google API Response Status:', response.status);
+                
                 if (!response.ok) {
-                    console.error('Google API error:', response.status);
+                    const errorText = await response.text();
+                    console.error('Google API error details:', errorText);
                     
                     if (response.status === 403) {
-                        alert('Google API quota exceeded or invalid credentials!\n\nCheck:\n1. API key is valid\n2. Custom Search API is enabled\n3. You have remaining quota');
+                        alert('Google API error!\n\nPossible issues:\n1. API key invalid\n2. Custom Search API not enabled\n3. Quota exceeded\n4. Search Engine ID incorrect\n\nUsing food estimates instead.');
                         localStorage.removeItem('google_api_key');
                         localStorage.removeItem('google_search_engine_id');
+                    } else if (response.status === 400) {
+                        alert('Bad request to Google API. Check your Search Engine ID.');
                     }
                     
-                    throw new Error(`Google API error: ${response.status}`);
+                    console.log('Falling back to nutrition estimation');
+                    return estimateNutritionFromFoodName(foodName);
                 }
 
                 const data = await response.json();
                 console.log('Google search results:', data);
                 
+                if (!data.items || data.items.length === 0) {
+                    console.log('No search results returned, using estimation');
+                    return estimateNutritionFromFoodName(foodName);
+                }
+                
                 // Extract nutrition information from search results
                 const nutrition = extractNutritionFromSearchResults(data, foodName);
                 
-                console.log('✓ Extracted nutrition from Google:', nutrition);
+                console.log('✓ Final nutrition data:', nutrition);
                 
                 // Cache the result
                 nutritionCache[cacheKey] = nutrition;
@@ -877,63 +889,107 @@
             }
         }
 
-        // Extract nutrition information from Google search results
+        // Extract nutrition information from Google search results - IMPROVED VERSION
         function extractNutritionFromSearchResults(searchData, foodName) {
-            let calories = 150, protein = 10, carbs = 20, fat = 5;
+            let calories = null, protein = null, carbs = null, fat = null;
             
             if (!searchData.items || searchData.items.length === 0) {
-                console.log('No search results found, using defaults');
-                return { calories, protein, carbs, fat };
+                console.log('No search results found, using estimates');
+                return estimateNutritionFromFoodName(foodName);
             }
             
             // Combine all text content from search results
             let allText = '';
             searchData.items.forEach(item => {
                 allText += ' ' + (item.title || '') + ' ' + (item.snippet || '');
+                // Also check if there's structured data
+                if (item.pagemap && item.pagemap.nutritioninformation) {
+                    allText += ' ' + JSON.stringify(item.pagemap.nutritioninformation);
+                }
             });
             
-            console.log('Analyzing text:', allText.substring(0, 500) + '...');
+            console.log('Analyzing text for nutrition data...');
+            console.log('Sample text:', allText.substring(0, 300));
             
-            // Extract nutrition values using regex patterns
+            // Improved extraction patterns - more comprehensive
             const patterns = {
-                calories: /(\d+)\s*(?:calories?|cal|kcal)/i,
-                protein: /(\d+(?:\.\d+)?)\s*g?\s*protein/i,
-                carbs: /(\d+(?:\.\d+)?)\s*g?\s*(?:carbs?|carbohydrates?)/i,
-                fat: /(\d+(?:\.\d+)?)\s*g?\s*(?:fat|fats)/i
+                calories: [
+                    /(\d+)\s*(?:calories?|cal|kcal)(?:\s*per|\/|\s|$)/gi,
+                    /(?:calories?|cal|kcal)[\s:]*(\d+)/gi,
+                    /energy[\s:]*(\d+)/gi
+                ],
+                protein: [
+                    /(\d+(?:\.\d+)?)\s*g?\s*protein/gi,
+                    /protein[\s:]*(\d+(?:\.\d+)?)\s*g?/gi,
+                    /(\d+(?:\.\d+)?)\s*g\s*protein/gi
+                ],
+                carbs: [
+                    /(\d+(?:\.\d+)?)\s*g?\s*(?:carbs?|carbohydrates?)/gi,
+                    /(?:carbs?|carbohydrates?)[\s:]*(\d+(?:\.\d+)?)\s*g?/gi,
+                    /(\d+(?:\.\d+)?)\s*g\s*(?:carbs?|carbohydrates?)/gi
+                ],
+                fat: [
+                    /(\d+(?:\.\d+)?)\s*g?\s*(?:total\s*)?fat/gi,
+                    /(?:total\s*)?fat[\s:]*(\d+(?:\.\d+)?)\s*g?/gi,
+                    /(\d+(?:\.\d+)?)\s*g\s*(?:total\s*)?fat/gi
+                ]
             };
             
-            // Try to extract each macro
+            // Try each pattern for each macro
             Object.keys(patterns).forEach(macro => {
-                const match = allText.match(patterns[macro]);
-                if (match) {
-                    const value = parseFloat(match[1]);
-                    if (value > 0 && value < 2000) { // Sanity check
-                        switch(macro) {
-                            case 'calories':
-                                calories = Math.round(value);
-                                break;
-                            case 'protein':
-                                protein = Math.round(value * 10) / 10;
-                                break;
-                            case 'carbs':
-                                carbs = Math.round(value * 10) / 10;
-                                break;
-                            case 'fat':
-                                fat = Math.round(value * 10) / 10;
-                                break;
+                const patternList = patterns[macro];
+                
+                for (let pattern of patternList) {
+                    const matches = allText.matchAll(pattern);
+                    for (let match of matches) {
+                        const value = parseFloat(match[1]);
+                        
+                        // Sanity checks for reasonable values
+                        if (value > 0) {
+                            if (macro === 'calories' && value >= 1 && value <= 2000) {
+                                if (!calories || Math.abs(value - estimateCaloriesFromFoodName(foodName)) < Math.abs(calories - estimateCaloriesFromFoodName(foodName))) {
+                                    calories = value;
+                                }
+                            } else if (macro !== 'calories' && value >= 0 && value <= 200) {
+                                if (!window[macro] || value > 0) {
+                                    switch(macro) {
+                                        case 'protein':
+                                            if (!protein) protein = value;
+                                            break;
+                                        case 'carbs':
+                                            if (!carbs) carbs = value;
+                                            break;
+                                        case 'fat':
+                                            if (!fat) fat = value;
+                                            break;
+                                    }
+                                }
+                            }
                         }
-                        console.log(`Found ${macro}: ${value}`);
+                    }
+                    
+                    // Break if we found a value for this macro
+                    if ((macro === 'calories' && calories) || 
+                        (macro === 'protein' && protein) || 
+                        (macro === 'carbs' && carbs) || 
+                        (macro === 'fat' && fat)) {
+                        break;
                     }
                 }
             });
             
-            // Special handling for common foods if no data found
-            if (calories === 150) { // Default value means nothing was found
-                calories = estimateCaloriesFromFoodName(foodName);
-                protein = Math.round(calories * 0.15 / 4); // Rough estimate
-                carbs = Math.round(calories * 0.45 / 4);
-                fat = Math.round(calories * 0.30 / 9);
+            console.log('Extracted values:', { calories, protein, carbs, fat });
+            
+            // If we didn't find enough data, use estimation
+            if (!calories || (!protein && !carbs && !fat)) {
+                console.log('Insufficient data found, using estimation');
+                return estimateNutritionFromFoodName(foodName);
             }
+            
+            // Fill missing values with estimates based on calories
+            if (!protein) protein = Math.round(calories * 0.15 / 4 * 10) / 10;
+            if (!carbs) carbs = Math.round(calories * 0.45 / 4 * 10) / 10;
+            if (!fat) fat = Math.round(calories * 0.30 / 9 * 10) / 10;
             
             return {
                 calories: Math.round(calories),
@@ -943,28 +999,95 @@
             };
         }
 
-        // Rough calorie estimation for common foods
-        function estimateCaloriesFromFoodName(foodName) {
+        // Enhanced nutrition estimation for common foods
+        function estimateNutritionFromFoodName(foodName) {
             const name = foodName.toLowerCase();
             
             // Extract quantity if present
             const quantityMatch = name.match(/(\d+)/);
             const quantity = quantityMatch ? parseInt(quantityMatch[1]) : 1;
             
-            let baseCalories = 150; // Default
+            let baseCalories = 150;
+            let baseProtein = 10;
+            let baseCarbs = 20;
+            let baseFat = 5;
             
-            if (name.includes('egg')) baseCalories = 70 * quantity;
-            else if (name.includes('apple')) baseCalories = 80 * quantity;
-            else if (name.includes('banana')) baseCalories = 100 * quantity;
-            else if (name.includes('chicken')) baseCalories = 200 * quantity;
-            else if (name.includes('rice')) baseCalories = 130 * quantity;
-            else if (name.includes('bread') || name.includes('toast')) baseCalories = 80 * quantity;
-            else if (name.includes('milk')) baseCalories = 150 * quantity;
-            else if (name.includes('cheese')) baseCalories = 100 * quantity;
-            else if (name.includes('salmon') || name.includes('fish')) baseCalories = 180 * quantity;
-            else if (name.includes('avocado')) baseCalories = 250 * quantity;
+            // Comprehensive food database
+            if (name.includes('egg')) {
+                baseCalories = 70 * quantity;
+                baseProtein = 6 * quantity;
+                baseCarbs = 0.5 * quantity;
+                baseFat = 5 * quantity;
+            } else if (name.includes('oreo')) {
+                baseCalories = 53 * quantity; // Per cookie
+                baseProtein = 0.5 * quantity;
+                baseCarbs = 8 * quantity;
+                baseFat = 2.3 * quantity;
+            } else if (name.includes('chicken breast')) {
+                baseCalories = 165;
+                baseProtein = 31;
+                baseCarbs = 0;
+                baseFat = 3.6;
+            } else if (name.includes('apple')) {
+                baseCalories = 80 * quantity;
+                baseProtein = 0.3 * quantity;
+                baseCarbs = 21 * quantity;
+                baseFat = 0.2 * quantity;
+            } else if (name.includes('banana')) {
+                baseCalories = 105 * quantity;
+                baseProtein = 1.3 * quantity;
+                baseCarbs = 27 * quantity;
+                baseFat = 0.4 * quantity;
+            } else if (name.includes('rice')) {
+                baseCalories = 130 * quantity;
+                baseProtein = 2.7 * quantity;
+                baseCarbs = 28 * quantity;
+                baseFat = 0.3 * quantity;
+            } else if (name.includes('bread') || name.includes('toast')) {
+                baseCalories = 80 * quantity;
+                baseProtein = 4 * quantity;
+                baseCarbs = 14 * quantity;
+                baseFat = 1 * quantity;
+            } else if (name.includes('milk')) {
+                baseCalories = 150 * quantity;
+                baseProtein = 8 * quantity;
+                baseCarbs = 12 * quantity;
+                baseFat = 8 * quantity;
+            } else if (name.includes('cheese')) {
+                baseCalories = 113 * quantity;
+                baseProtein = 7 * quantity;
+                baseCarbs = 1 * quantity;
+                baseFat = 9 * quantity;
+            } else if (name.includes('salmon') || name.includes('fish')) {
+                baseCalories = 180 * quantity;
+                baseProtein = 25 * quantity;
+                baseCarbs = 0;
+                baseFat = 8 * quantity;
+            } else if (name.includes('avocado')) {
+                baseCalories = 250 * quantity;
+                baseProtein = 3 * quantity;
+                baseCarbs = 12 * quantity;
+                baseFat = 23 * quantity;
+            } else if (name.includes('pasta')) {
+                baseCalories = 200 * quantity;
+                baseProtein = 7 * quantity;
+                baseCarbs = 40 * quantity;
+                baseFat = 1 * quantity;
+            }
             
-            return Math.round(baseCalories);
+            console.log(`Estimated nutrition for "${foodName}":`, {
+                calories: Math.round(baseCalories),
+                protein: Math.round(baseProtein * 10) / 10,
+                carbs: Math.round(baseCarbs * 10) / 10,
+                fat: Math.round(baseFat * 10) / 10
+            });
+            
+            return {
+                calories: Math.round(baseCalories),
+                protein: Math.round(baseProtein * 10) / 10,
+                carbs: Math.round(baseCarbs * 10) / 10,
+                fat: Math.round(baseFat * 10) / 10
+            };
         }
 
         // FIXED: Add food function
