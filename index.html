@@ -799,7 +799,7 @@
             
             // If no API key stored, prompt for it
             if (!apiKey) {
-                apiKey = prompt('Enter your NEW OpenAI API key (starts with sk-):\n\nYour previous key was compromised!\nGet a new one at: platform.openai.com/api-keys');
+                apiKey = prompt('Enter your OpenAI API key (starts with sk-):\n\nGet one at: platform.openai.com/api-keys');
                 if (apiKey && apiKey.startsWith('sk-')) {
                     localStorage.setItem('openai_api_key', apiKey);
                 } else {
@@ -854,7 +854,7 @@
                     if (response.status === 401) {
                         // Invalid API key
                         localStorage.removeItem('openai_api_key');
-                        alert('Invalid API key! You need to:\n1. Go to platform.openai.com/api-keys\n2. Revoke the old key\n3. Create a NEW key\n4. Reload this page and enter the new key');
+                        alert('Invalid API key! Please get a new one from platform.openai.com/api-keys');
                         return {
                             calories: 150,
                             protein: 10,
@@ -943,6 +943,80 @@
             }
         }
 
+        // FIXED: Add food function
+        async function addFood() {
+            const foodInput = document.getElementById('foodInput');
+            const foodName = foodInput.value.trim();
+            
+            if (!foodName) {
+                alert('Please enter a food item');
+                return;
+            }
+            
+            // Disable the button to prevent multiple clicks
+            const addBtn = document.querySelector('.btn');
+            addBtn.disabled = true;
+            addBtn.textContent = 'Adding...';
+            
+            try {
+                const nutrition = await getNutritionFromAPI(foodName);
+                
+                const todayData = getTodayData();
+                todayData[currentMealType].push({
+                    name: foodName,
+                    calories: nutrition.calories,
+                    protein: nutrition.protein,
+                    carbs: nutrition.carbs,
+                    fat: nutrition.fat
+                });
+                
+                saveData();
+                updateDisplay();
+                
+                // Clear input and reset button
+                foodInput.value = '';
+                
+            } catch (error) {
+                console.error('Error adding food:', error);
+                alert('Error adding food. Please try again.');
+            } finally {
+                // Re-enable the button
+                addBtn.disabled = false;
+                addBtn.textContent = 'Add';
+            }
+        }
+
+        // FIXED: Delete food function
+        function deleteFood(mealType, index) {
+            if (confirm('Delete this food item?')) {
+                const todayData = getTodayData();
+                todayData[mealType].splice(index, 1);
+                saveData();
+                updateDisplay();
+            }
+        }
+
+        // FIXED: Edit food function
+        function editFood(mealType, index) {
+            const todayData = getTodayData();
+            const food = todayData[mealType][index];
+            
+            const newName = prompt('Edit food item:', food.name);
+            if (newName && newName.trim() !== food.name) {
+                // Get new nutrition data
+                getNutritionFromAPI(newName.trim()).then(nutrition => {
+                    food.name = newName.trim();
+                    food.calories = nutrition.calories;
+                    food.protein = nutrition.protein;
+                    food.carbs = nutrition.carbs;
+                    food.fat = nutrition.fat;
+                    
+                    saveData();
+                    updateDisplay();
+                });
+            }
+        }
+
         // Clear API key function (for testing)
         function clearApiKey() {
             localStorage.removeItem('openai_api_key');
@@ -1028,6 +1102,8 @@
                             resetPhotoUpload();
                             
                             alert(`ChatGPT detected and added:\n${items.join('\n')}\n\nTap any item to edit if needed.`);
+                        } else {
+                            throw new Error('Photo analysis failed');
                         }
                     } catch (error) {
                         console.error('ChatGPT Vision error:', error);
@@ -1095,7 +1171,7 @@
             alert('Data exported successfully!');
         }
 
-        // Update display
+        // FIXED: Update display function
         function updateDisplay() {
             const todayData = getTodayData();
             let totalCals = 0, totalProtein = 0, totalCarbs = 0, totalFat = 0;
@@ -1117,18 +1193,22 @@
                         totalCarbs += food.carbs;
                         totalFat += food.fat;
 
-                        container.innerHTML += `
-                            <div class="food-item" onclick="editFood('${mealType}', ${index})">
-                                <span class="food-name">${food.name}</span>
-                                <div class="food-details">
-                                    <span class="macro">🔥 ${Math.round(food.calories)}</span>
-                                    <span class="macro">💪 ${Math.round(food.protein)}g</span>
-                                    <span class="macro">🌾 ${Math.round(food.carbs)}g</span>
-                                    <span class="macro">🥑 ${Math.round(food.fat)}g</span>
-                                </div>
-                                <button class="delete-btn" onclick="event.stopPropagation(); deleteFood('${mealType}', ${index})">×</button>
+                        const foodItemDiv = document.createElement('div');
+                        foodItemDiv.className = 'food-item';
+                        foodItemDiv.onclick = () => editFood(mealType, index);
+                        
+                        foodItemDiv.innerHTML = `
+                            <span class="food-name">${food.name}</span>
+                            <div class="food-details">
+                                <span class="macro">🔥 ${Math.round(food.calories)}</span>
+                                <span class="macro">💪 ${Math.round(food.protein)}g</span>
+                                <span class="macro">🌾 ${Math.round(food.carbs)}g</span>
+                                <span class="macro">🥑 ${Math.round(food.fat)}g</span>
                             </div>
+                            <button class="delete-btn" onclick="event.stopPropagation(); deleteFood('${mealType}', ${index})">×</button>
                         `;
+                        
+                        container.appendChild(foodItemDiv);
                     });
                 }
 
@@ -1141,10 +1221,15 @@
             document.getElementById('totalFat').textContent = Math.round(totalFat) + 'g';
         }
 
-        // Enter key support
-        document.getElementById('foodInput').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                addFood();
+        // Enter key support for food input
+        document.addEventListener('DOMContentLoaded', function() {
+            const foodInput = document.getElementById('foodInput');
+            if (foodInput) {
+                foodInput.addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') {
+                        addFood();
+                    }
+                });
             }
         });
 
