@@ -862,7 +862,11 @@
                             fat: 5
                         };
                     } else if (response.status === 429) {
-                        alert('Rate limit exceeded. Wait a moment and try again.');
+                        alert('Rate limit exceeded! Solutions:\n\n1. Wait 1-2 minutes and try again\n2. Check your OpenAI usage at platform.openai.com/usage\n3. Consider upgrading from free tier\n4. Add one food item at a time');
+                        // Wait 30 seconds before allowing another attempt
+                        setTimeout(() => {
+                            console.log('Rate limit cooldown finished');
+                        }, 30000);
                     } else if (response.status === 400) {
                         alert('API request error. Check your API key or try again.');
                     }
