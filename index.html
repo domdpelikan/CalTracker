@@ -509,18 +509,18 @@
 </head>
 <body>
     <div class="container">
-        <div class="user-info hidden" id="userInfo">
+                <div class="user-info hidden" id="userInfo">
             <span id="usernameDisplay"></span>
             <span class="logout-btn" onclick="logout()">Logout</span>
         </div>
-        <button class="export-btn" onclick="exportToCSV()">📥 Export CSV</button>
+        <button class="export-btn" onclick="exportToCSV()">Export CSV</button>
         <div class="header">
-            <h1>🍽️ Food Tracker</h1>
+            <h1>Food Tracker</h1>
             <div class="date-navigation">
                 <button class="nav-btn" onclick="changeDate(-1)">←</button>
                 <div class="date-display" id="dateDisplay">Loading...</div>
                 <button class="nav-btn" onclick="changeDate(1)">→</button>
-                <button class="today-btn" onclick="goToToday()">📅 Today</button>
+                <button class="today-btn" onclick="goToToday()">Today</button>
             </div>
         </div>
 
@@ -554,10 +554,10 @@
             </div>
             
             <div class="meal-type-selector">
-                <button class="meal-type-btn active" onclick="selectMealType('breakfast', this)">🌅 Breakfast</button>
-                <button class="meal-type-btn" onclick="selectMealType('lunch', this)">☀️ Lunch</button>
-                <button class="meal-type-btn" onclick="selectMealType('dinner', this)">🌙 Dinner</button>
-                <button class="meal-type-btn" onclick="selectMealType('snacks', this)">🍿 Snacks</button>
+                <button class="meal-type-btn active" onclick="selectMealType('breakfast', this)">Breakfast</button>
+                <button class="meal-type-btn" onclick="selectMealType('lunch', this)">Lunch</button>
+                <button class="meal-type-btn" onclick="selectMealType('dinner', this)">Dinner</button>
+                <button class="meal-type-btn" onclick="selectMealType('snacks', this)">Snacks</button>
             </div>
 
             <div class="input-group">
@@ -569,7 +569,7 @@
         <div class="meal-sections">
             <div class="meal-section">
                 <div class="meal-header">
-                    <span class="meal-title">🌅 Breakfast</span>
+                    <span class="meal-title">Breakfast</span>
                     <span class="meal-calories" id="breakfastCals">0 cal</span>
                 </div>
                 <div id="breakfastItems">
@@ -579,7 +579,7 @@
 
             <div class="meal-section">
                 <div class="meal-header">
-                    <span class="meal-title">☀️ Lunch</span>
+                    <span class="meal-title">Lunch</span>
                     <span class="meal-calories" id="lunchCals">0 cal</span>
                 </div>
                 <div id="lunchItems">
@@ -589,7 +589,7 @@
 
             <div class="meal-section">
                 <div class="meal-header">
-                    <span class="meal-title">🌙 Dinner</span>
+                    <span class="meal-title">Dinner</span>
                     <span class="meal-calories" id="dinnerCals">0 cal</span>
                 </div>
                 <div id="dinnerItems">
@@ -599,7 +599,7 @@
 
             <div class="meal-section">
                 <div class="meal-header">
-                    <span class="meal-title">🍿 Snacks</span>
+                    <span class="meal-title">Snacks</span>
                     <span class="meal-calories" id="snacksCals">0 cal</span>
                 </div>
                 <div id="snacksItems">
@@ -636,7 +636,7 @@
                 currentUser = savedUsername;
                 document.getElementById('loginModal').classList.add('hidden');
                 document.getElementById('userInfo').classList.remove('hidden');
-                document.getElementById('usernameDisplay').textContent = `👤 ${savedUsername}`;
+                document.getElementById('usernameDisplay').textContent = `${savedUsername}`;
                 loadData();
             } else {
                 document.getElementById('loginModal').classList.remove('hidden');
@@ -691,7 +691,7 @@
                 localStorage.setItem('foodTrackerUsername', username);
                 document.getElementById('loginModal').classList.add('hidden');
                 document.getElementById('userInfo').classList.remove('hidden');
-                document.getElementById('usernameDisplay').textContent = `👤 ${username}`;
+                document.getElementById('usernameDisplay').textContent = `${username}`;
                 loadData();
             }
         }
@@ -1249,10 +1249,10 @@
                         foodItemDiv.innerHTML = `
                             <span class="food-name">${food.name}</span>
                             <div class="food-details">
-                                <span class="macro">🔥 ${Math.round(food.calories)}</span>
-                                <span class="macro">💪 ${Math.round(food.protein)}g</span>
-                                <span class="macro">🌾 ${Math.round(food.carbs)}g</span>
-                                <span class="macro">🥑 ${Math.round(food.fat)}g</span>
+                                <span class="macro">Cal: ${Math.round(food.calories)}</span>
+                                <span class="macro">Pro: ${Math.round(food.protein)}g</span>
+                                <span class="macro">Carb: ${Math.round(food.carbs)}g</span>
+                                <span class="macro">Fat: ${Math.round(food.fat)}g</span>
                             </div>
                             <button class="delete-btn" onclick="event.stopPropagation(); deleteFood('${mealType}', ${index})">×</button>
                         `;
